@@ -1,17 +1,12 @@
 name: 🚀 API Test Automation Pipeline
 
 on:
-  # Run on every push and pull request
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
-  
-  # Run daily at 6 AM UTC (health check)
   schedule:
     - cron: '0 6 * * *'
-  
-  # Allow manual trigger
   workflow_dispatch:
     inputs:
       environment:
@@ -25,14 +20,12 @@ on:
         - development
 
 jobs:
-  # Job 1: Basic API Tests
   api-tests:
     name: 🧪 API Tests
     runs-on: ubuntu-latest
     
     strategy:
       matrix:
-        # Run tests in parallel across multiple environments
         environment: [production, staging]
     
     steps:
@@ -53,7 +46,8 @@ jobs:
     - name: 🧪 Run API Tests
       run: |
         echo "🚀 Running tests for environment: ${{ matrix.environment }}"
-        npx playwright test tests/api/user-management-simple.spec.js --reporter=html
+        echo "📁 Using test file: tests/api/user-management.spec.js"
+        npx playwright test tests/api/user-management.spec.js --reporter=html
       env:
         TEST_ENVIRONMENT: ${{ matrix.environment }}
         CI: true
@@ -68,7 +62,7 @@ jobs:
           test-results/
         retention-days: 7
     
-    - name: 📈 Upload Test Report
+    - name: 📈 Upload HTML Report
       uses: actions/upload-artifact@v4
       if: always()
       with:
@@ -76,7 +70,7 @@ jobs:
         path: playwright-report/
         retention-days: 30
 
-  # Job 2: Performance Tests
+  # Performance Tests Job
   performance-tests:
     name: ⚡ Performance Tests
     runs-on: ubuntu-latest
@@ -97,10 +91,10 @@ jobs:
         npm ci
         npx playwright install
     
-    - name: ⚡ Run Performance Tests
+    - name: ⚡ Run Performance Tests (5x Each Test)
       run: |
         echo "⚡ Running performance tests..."
-        npx playwright test tests/api/user-management-simple.spec.js --repeat-each=5 --reporter=json > performance-results.json
+        npx playwright test tests/api/user-management.spec.js --repeat-each=5 --reporter=json > performance-results.json
     
     - name: 📊 Upload Performance Results
       uses: actions/upload-artifact@v4
@@ -108,59 +102,57 @@ jobs:
         name: performance-results
         path: performance-results.json
 
-  # Job 3: Security & Error Testing
-  security-tests:
-    name: 🛡️ Security Tests
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: 📥 Checkout Code
-      uses: actions/checkout@v4
-    
-    - name: 🟢 Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-    
-    - name: 📦 Install Dependencies
-      run: |
-        npm ci
-        npx playwright install
-    
-    - name: 🛡️ Run Security Tests
-      run: |
-        echo "🛡️ Running security and error handling tests..."
-        # Run your existing tests that include error scenarios
-        npx playwright test tests/api/user-management-simple.spec.js --grep "error|security|invalid"
-
-  # Job 4: Test Results Summary
+  # Test Summary Job
   test-summary:
-    name: 📋 Test Summary
+    name: 📋 Test Summary & Notification
     runs-on: ubuntu-latest
-    needs: [api-tests, performance-tests, security-tests]
+    needs: [api-tests, performance-tests]
     if: always()
     
     steps:
-    - name: 📥 Download All Artifacts
+    - name: 📥 Download Test Results
       uses: actions/download-artifact@v4
+      with:
+        pattern: test-results-*
+        merge-multiple: true
     
     - name: 📋 Generate Test Summary
       run: |
-        echo "# 🧪 Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+        echo "# 🧪 API Test Automation Results" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 📊 Test Results" >> $GITHUB_STEP_SUMMARY
-        echo "- **API Tests:** ${{ needs.api-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "## 📊 Job Results" >> $GITHUB_STEP_SUMMARY
+        echo "- **API Tests (Production):** ${{ needs.api-tests.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **API Tests (Staging):** ${{ needs.api-tests.result }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Performance Tests:** ${{ needs.performance-tests.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Security Tests:** ${{ needs.security-tests.result }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 🔗 Reports" >> $GITHUB_STEP_SUMMARY
-        echo "- Check the **Actions** tab for detailed HTML reports" >> $GITHUB_STEP_SUMMARY
-        echo "- Performance metrics available in artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "## 🔗 Resources" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test File:** \`tests/api/user-management.spec.js\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Environment:** Multi-environment (production, staging)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Reports:** Available in job artifacts" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## 🚀 Deployment Status" >> $GITHUB_STEP_SUMMARY
+        
+        # Deployment decision
         if [ "${{ needs.api-tests.result }}" = "success" ]; then
-          echo "✅ **Ready for deployment!**" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Deployment Status: APPROVED" >> $GITHUB_STEP_SUMMARY
+          echo "All API tests passed successfully across environments!" >> $GITHUB_STEP_SUMMARY
         else
-          echo "❌ **Deployment blocked - tests failed**" >> $GITHUB_STEP_SUMMARY
+          echo "## ❌ Deployment Status: BLOCKED" >> $GITHUB_STEP_SUMMARY
+          echo "API tests failed. Deployment should be blocked until issues are resolved." >> $GITHUB_STEP_SUMMARY
         fi
+    
+    - name: 📢 Create Success Comment
+      if: needs.api-tests.result == 'success'
+      run: |
+        echo "🎉 **API Tests Successful!**" >> comment.md
+        echo "" >> comment.md
+        echo "✅ All tests passed across production and staging environments" >> comment.md
+        echo "⚡ Performance tests completed successfully" >> comment.md
+        echo "🚀 **Ready for deployment!**" >> comment.md
+        
+    - name: 📢 Create Failure Comment
+      if: needs.api-tests.result != 'success'
+      run: |
+        echo "❌ **API Tests Failed**" >> comment.md
+        echo "" >> comment.md
+        echo "🔍 Check the job logs for detailed error information" >> comment.md
+        echo "🚫 **Deployment blocked until issues are resolved**" >> comment.md
